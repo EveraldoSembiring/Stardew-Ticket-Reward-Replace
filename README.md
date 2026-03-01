@@ -1,13 +1,13 @@
 # Lucky Ticket Reward Replacer
 
-A [SMAPI](https://smapi.io) mod for **Stardew Valley 1.6** that lets you fully customize the prizes available at Lewis' Prize Ticket Machine — with an in-game editor menu, no file editing required.
+A [SMAPI](https://smapi.io) mod for **Stardew Valley 1.6** that lets you fully customize the prizes available at Lewis' Prize Ticket Machine using an in-game config menu.
 
 ## Features
 
-- **In-game editor** — open a menu at any time to add or remove rewards on the fly
-- **Per-item ticket cost** — set how many prize tickets each reward requires
-- **Instant apply** — changes take effect immediately without restarting the game
+- **In-game editor** — configure rewards directly from the pause or title menu via Generic Mod Config Menu
+- **Add & remove rewards** — live add/remove with item icon preview
 - **Persistent config** — your reward list is saved to `config.json` automatically
+- **Harmony-patched** — replaces the hardcoded prize list in `PrizeTicketMenu` at runtime
 
 ## Requirements
 
@@ -15,43 +15,35 @@ A [SMAPI](https://smapi.io) mod for **Stardew Valley 1.6** that lets you fully c
 |---|---|
 | Stardew Valley | 1.6+ |
 | SMAPI | 4.0.0+ |
+| [Generic Mod Config Menu](https://www.nexusmods.com/stardewvalley/mods/5098) | any |
 
 ## Installation
 
 1. Install [SMAPI](https://smapi.io)
-2. Download this mod and extract it into your `Stardew Valley/Mods/` folder
-3. Launch the game through SMAPI (`StardewModdingAPI.exe`)
+2. Install [Generic Mod Config Menu](https://www.nexusmods.com/stardewvalley/mods/5098)
+3. Download this mod and extract it into your `Stardew Valley/Mods/` folder
+4. Launch the game through SMAPI (`StardewModdingAPI.exe`)
 
 ## Usage
 
-Press **F8** anywhere in-game to open the reward editor.
+Open the in-game menu → **Options** → **Mod Config** → **Lucky Ticket Reward Replacer**.
 
 ```
 ┌─────────────────────────────────────────────────┐
-│          Prize Ticket Reward Editor             │
+│       Lucky Ticket Reward Replacer              │
 ├─────────────────────────────────────────────────┤
-│  Item Name                  Tickets             │
-│  ─────────────────────────────────────────────  │
-│  Diamond                       1          [Del] │
-│  Iridium Bar                   2          [Del] │
-│  Prismatic Shard               5          [Del] │
+│  Add Reward                                     │
+│  Item ID:  [(O)72_____________________]         │
+│  [+ Add to List]   Added: Diamond               │
 ├─────────────────────────────────────────────────┤
-│  Item ID (e.g. (O)72):  [________]              │
-│  Tickets: [__]               [Add Item]         │
-│                          [Save & Close]         │
+│  Current Rewards                                │
+│  [icon] Diamond                    [Remove]     │
+│  [icon] Iridium Bar                [Remove]     │
+│  [icon] Prismatic Shard            [Remove]     │
 └─────────────────────────────────────────────────┘
 ```
 
-### Editor Controls
-
-| Action | Input |
-|---|---|
-| Open editor | F8 (configurable) |
-| Switch between input fields | Tab |
-| Add item (from cost field) | Enter |
-| Remove a reward | Click **Del** |
-| Scroll reward list | Mouse wheel or ^/v buttons |
-| Save and close | **Save & Close** button or Escape |
+Changes take effect the next time you open the prize machine.
 
 ### Finding Item IDs
 
@@ -63,35 +55,32 @@ Item IDs use a qualified format: `(Type)ID`
 | `(W)` | Weapon | `(W)4` — Pirate's Sword |
 | `(H)` | Hat | `(H)28` — Propeller Hat |
 | `(F)` | Furniture | `(F)1226` — Bookcase |
+| `(BC)` | Big Craftable | `(BC)FishSmoker` — Fish Smoker |
 | `(B)` | Boots | `(B)505` — Space Boots |
 
 A full list is available on the [Stardew Valley Wiki — Item IDs](https://stardewvalleywiki.com/Modding:Item_IDs).
 
 ## Configuration
 
-`config.json` is created in the mod folder on first launch.
+`config.json` is created in the mod folder on first launch. It is recommended to edit it through the in-game GMCM menu rather than manually.
 
 ```json
 {
-  "OpenEditorKey": "F8",
-  "PrizeTicketItemId": "(O)897",
   "Rewards": [
-    { "ItemId": "(O)72",  "TicketCost": 1 },
-    { "ItemId": "(O)337", "TicketCost": 2 },
-    { "ItemId": "(O)74",  "TicketCost": 5 }
+    { "ItemId": "(O)631" },
+    { "ItemId": "(O)630" },
+    { "ItemId": "(H)SportsCap" }
   ]
 }
 ```
 
 | Field | Description |
 |---|---|
-| `OpenEditorKey` | Keybind to open the editor. Supports SMAPI [multi-key bindings](https://stardewvalleywiki.com/Modding:Player_Guide/Key_Bindings). |
-| `PrizeTicketItemId` | Qualified item ID of the prize ticket used as currency. Change this if the default doesn't match your game version. |
-| `Rewards` | List of reward entries. Each entry has an `ItemId` and a `TicketCost`. |
+| `Rewards` | List of reward entries. Each entry requires an `ItemId`. Each prize costs 1 prize ticket and can only be claimed once. |
 
 ## Building from Source
 
-Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download).
+Requires the [.NET 6 SDK](https://dotnet.microsoft.com/download).
 
 ```bash
 dotnet build
