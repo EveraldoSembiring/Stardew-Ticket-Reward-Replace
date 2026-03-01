@@ -10,7 +10,7 @@ using StardewModdingAPI.Events;
 using StardewValley;
 using StardewValley.Menus;
 
-namespace LuckyTicketRewardReplacer
+namespace CustomPrizeTicket
 {
     internal sealed class ModEntry : Mod
     {
@@ -18,12 +18,21 @@ namespace LuckyTicketRewardReplacer
         private static ModEntry _instance = null!;
 
         private ModConfig _config = null!;
+        private string[] _allItemIds = Array.Empty<string>();
 
         // GMCM add-form state
         private string _newItemId = "(O)72";
         private string _statusMsg = string.Empty;
         private bool _wasMouseDownAdd;
         private bool _wasMouseDownList;
+        private bool _wasMouseDownPicker;
+
+        // Item picker filter state
+        private TextBox? _filterBox;
+        private string[] _filteredItemIds = Array.Empty<string>();
+        private string _lastFilter = "";
+        private int _itemListScroll;
+        private int _prevScrollWheelValue;
 
         public override void Entry(IModHelper helper)
         {
@@ -37,7 +46,18 @@ namespace LuckyTicketRewardReplacer
         private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
         {
             ApplyHarmonyPatch();
+            BuildItemList();
             RegisterGmcm();
+        }
+
+        private void BuildItemList()
+        {
+            _allItemIds = ItemRegistry.ItemTypes
+                .SelectMany(t => t.GetAllIds().Select(id => t.Identifier + id))
+                .OrderBy(id => ItemRegistry.GetData(id)?.DisplayName ?? id)
+                .ToArray();
+
+            Monitor.Log($"Loaded {_allItemIds.Length} items for reward picker.", LogLevel.Debug);
         }
 
         private void ApplyHarmonyPatch()
@@ -62,6 +82,9 @@ namespace LuckyTicketRewardReplacer
         // Finds the internal List<Item> field and replaces it with our config.
         private static void PrizeTicketMenuCtorPostfix(PrizeTicketMenu __instance)
         {
+            if (!_instance._config.Enabled)
+                return;
+
             var newItems = _instance._config.Rewards
                 .Select(r => ItemRegistry.Create(r.ItemId, allowNull: true))
                 .OfType<Item>()
@@ -107,15 +130,40 @@ namespace LuckyTicketRewardReplacer
                 save: () => Helper.WriteConfig(_config)
             );
 
+            gmcm.AddBoolOption(
+                mod: ModManifest,
+                name: () => "Enable Reward Replacement",
+                tooltip: () => "When disabled, Lewis' prize machine uses the vanilla default rewards.",
+                getValue: () => _config.Enabled,
+                setValue: v => _config.Enabled = v
+            );
+
             // ── Add Reward ────────────────────────────────────────────────────
             gmcm.AddSectionTitle(ModManifest, () => "Add Reward");
 
-            gmcm.AddTextOption(
+            gmcm.AddComplexOption(
                 mod: ModManifest,
-                name: () => "Item ID",
-                tooltip: () => "Qualified item ID to add (e.g. (O)72 for Diamond, (H)28 for Propeller Hat).",
-                getValue: () => _newItemId,
-                setValue: v => { _newItemId = v; _statusMsg = string.Empty; }
+                name: () => string.Empty,
+                height: () => string.IsNullOrWhiteSpace(_lastFilter) ? 52 : 52 + 8 * 40,
+                draw: DrawItemPicker,
+                beforeMenuOpened: () =>
+                {
+                    _filterBox = new TextBox(
+                        Game1.content.Load<Texture2D>("LooseSprites\\textBox"),
+                        null, Game1.smallFont, Game1.textColor);
+                    _filterBox.Text = "";
+                    _lastFilter = "";
+                    _filteredItemIds = _allItemIds;
+                    _itemListScroll = 0;
+                    _prevScrollWheelValue = Game1.input.GetMouseState().ScrollWheelValue;
+                    _wasMouseDownPicker = false;
+                },
+                beforeMenuClosed: () =>
+                {
+                    if (_filterBox != null && Game1.keyboardDispatcher.Subscriber == _filterBox)
+                        Game1.keyboardDispatcher.Subscriber = null;
+                    _filterBox = null;
+                }
             );
 
             gmcm.AddComplexOption(
@@ -146,11 +194,15 @@ namespace LuckyTicketRewardReplacer
             bool justClicked = !isDown && _wasMouseDownAdd;
             _wasMouseDownAdd = isDown;
 
-            var btnRect = new Rectangle((int)pos.X, (int)pos.Y + 4, 140, 36);
-            b.Draw(Game1.staminaRect, btnRect,
-                Color.LightGreen * (btnRect.Contains(mouse) ? 1f : 0.7f));
-            b.DrawString(Game1.smallFont, "+ Add to List",
-                new Vector2(btnRect.X + 10, btnRect.Y + 9), Game1.textColor);
+            const string addLabel = "+ Add to List";
+            var addTextSize = Game1.smallFont.MeasureString(addLabel);
+            var btnRect = new Rectangle((int)pos.X, (int)pos.Y + 4, (int)addTextSize.X + 24, 36);
+            IClickableMenu.drawTextureBox(b, Game1.mouseCursors,
+                new Rectangle(432, 439, 9, 9),
+                btnRect.X, btnRect.Y, btnRect.Width, btnRect.Height,
+                btnRect.Contains(mouse) ? Color.Wheat : Color.White, 4f, false);
+            Utility.drawTextWithShadow(b, addLabel, Game1.smallFont,
+                new Vector2(btnRect.X + 12, btnRect.Y + (btnRect.Height - (int)addTextSize.Y) / 2), Game1.textColor);
 
             if (justClicked && btnRect.Contains(mouse))
                 TryAddItem();
@@ -159,8 +211,98 @@ namespace LuckyTicketRewardReplacer
             {
                 var color = _statusMsg.StartsWith("Added") ? new Color(0, 128, 0) : Color.Firebrick;
                 b.DrawString(Game1.smallFont, _statusMsg,
-                    new Vector2(pos.X + 150, pos.Y + 12), color);
+                    new Vector2(btnRect.Right + 12, btnRect.Y + (btnRect.Height - (int)addTextSize.Y) / 2), color);
             }
+        }
+
+        private void DrawItemPicker(SpriteBatch b, Vector2 pos)
+        {
+            if (_filterBox == null) return;
+
+            Point mouse = new(Game1.getMouseX(true), Game1.getMouseY(true));
+            bool isDown = Game1.input.GetMouseState().LeftButton == ButtonState.Pressed;
+            bool justClicked = !isDown && _wasMouseDownPicker;
+
+            // ── Filter box ────────────────────────────────────────────────────────
+            _filterBox.X = (int)pos.X;
+            _filterBox.Y = (int)pos.Y;
+            _filterBox.Width = 400;
+            _filterBox.Draw(b, false);
+
+            if (justClicked && new Rectangle(_filterBox.X, _filterBox.Y, _filterBox.Width, 48).Contains(mouse))
+                _filterBox.SelectMe();
+
+            // ── Recompute filtered list when text changes ──────────────────────────
+            string currentText = _filterBox.Text ?? "";
+            if (currentText != _lastFilter)
+            {
+                _lastFilter = currentText;
+                _itemListScroll = 0;
+                _filteredItemIds = string.IsNullOrWhiteSpace(currentText)
+                    ? _allItemIds
+                    : _allItemIds.Where(id =>
+                    {
+                        var data = ItemRegistry.GetData(id);
+                        return (data?.DisplayName?.Contains(currentText, StringComparison.OrdinalIgnoreCase) == true)
+                            || id.Contains(currentText, StringComparison.OrdinalIgnoreCase);
+                    }).ToArray();
+            }
+
+            // ── Scroll wheel ──────────────────────────────────────────────────────
+            const int visibleRows = 8;
+            int listTopY = (int)pos.Y + 52;
+            var listRegion = new Rectangle((int)pos.X, listTopY, 560, visibleRows * 40);
+            int currentWheel = Game1.input.GetMouseState().ScrollWheelValue;
+            if (listRegion.Contains(mouse) && currentWheel != _prevScrollWheelValue)
+            {
+                int delta = (_prevScrollWheelValue - currentWheel) / 120;
+                _itemListScroll = Math.Clamp(_itemListScroll + delta, 0,
+                    Math.Max(0, _filteredItemIds.Length - visibleRows));
+            }
+            _prevScrollWheelValue = currentWheel;
+
+            // ── Item rows (only when filter is active) ────────────────────────────
+            if (!string.IsNullOrWhiteSpace(currentText))
+            {
+                for (int i = 0; i < visibleRows; i++)
+                {
+                    int idx = i + _itemListScroll;
+                    if (idx >= _filteredItemIds.Length) break;
+
+                    string id = _filteredItemIds[idx];
+                    var itemData = ItemRegistry.GetData(id);
+                    int rowY = listTopY + i * 40;
+                    var rowRect = new Rectangle((int)pos.X, rowY, 500, 36);
+
+                    if (id == _newItemId)
+                        b.Draw(Game1.staminaRect, rowRect, new Color(100, 200, 100, 150));
+                    else if (rowRect.Contains(mouse))
+                        b.Draw(Game1.staminaRect, rowRect, new Color(200, 200, 200, 80));
+
+                    b.DrawString(Game1.smallFont, itemData?.DisplayName ?? id,
+                        new Vector2(rowRect.X + 6, rowY + 10), Game1.textColor);
+
+                    if (justClicked && rowRect.Contains(mouse))
+                    {
+                        _newItemId = id;
+                        _statusMsg = string.Empty;
+                    }
+                }
+
+                // ── Scrollbar ─────────────────────────────────────────────────────
+                if (_filteredItemIds.Length > visibleRows)
+                {
+                    int sbX = (int)pos.X + 506;
+                    int sbH = visibleRows * 40;
+                    b.Draw(Game1.staminaRect, new Rectangle(sbX, listTopY, 8, sbH), Color.Gray * 0.4f);
+                    int thumbH = Math.Max(16, sbH * visibleRows / _filteredItemIds.Length);
+                    int thumbY = listTopY + (sbH - thumbH) * _itemListScroll /
+                                 Math.Max(1, _filteredItemIds.Length - visibleRows);
+                    b.Draw(Game1.staminaRect, new Rectangle(sbX, thumbY, 8, thumbH), Color.Gray);
+                }
+            }
+
+            _wasMouseDownPicker = isDown;
         }
 
         private void DrawRewardList(SpriteBatch b, Vector2 pos)
@@ -183,31 +325,28 @@ namespace LuckyTicketRewardReplacer
                 int rowY = (int)pos.Y + i * 40;
 
                 var itemData = ItemRegistry.GetData(reward.ItemId);
-                if (itemData is not null)
-                {
-                    b.Draw(itemData.GetTexture(), new Vector2(pos.X, rowY + 4),
-                        itemData.GetSourceRect(), Color.White, 0f, Vector2.Zero, 2f,
-                        SpriteEffects.None, 1f);
-                    b.DrawString(Game1.smallFont, itemData.DisplayName,
-                        new Vector2(pos.X + 40, rowY + 10), Game1.textColor);
-                }
-                else
-                {
-                    b.DrawString(Game1.smallFont, $"[Unknown] {reward.ItemId}",
-                        new Vector2(pos.X, rowY + 10), Color.Firebrick);
-                }
+                string displayName = itemData?.DisplayName ?? $"[Unknown] {reward.ItemId}";
+                Color textColor = itemData is not null ? Game1.textColor : Color.Firebrick;
+                b.DrawString(Game1.smallFont, displayName, new Vector2(pos.X + 6, rowY + 10), textColor);
 
-                var removeRect = new Rectangle((int)pos.X + 500, rowY + 4, 90, 30);
-                b.Draw(Game1.staminaRect, removeRect,
-                    Color.Salmon * (removeRect.Contains(mouse) ? 1f : 0.7f));
-                b.DrawString(Game1.smallFont, "Remove",
-                    new Vector2(removeRect.X + 8, removeRect.Y + 7), Color.White);
-
-                if (justClicked && removeRect.Contains(mouse))
+                if (_config.Rewards.Count > 3)
                 {
-                    _config.Rewards.RemoveAt(i);
-                    _wasMouseDownList = false;
-                    return;
+                    const string removeLabel = "Remove";
+                    var removeTextSize = Game1.smallFont.MeasureString(removeLabel);
+                    var removeRect = new Rectangle((int)pos.X + 500, rowY + 4, (int)removeTextSize.X + 24, 30);
+                    IClickableMenu.drawTextureBox(b, Game1.mouseCursors,
+                        new Rectangle(432, 439, 9, 9),
+                        removeRect.X, removeRect.Y, removeRect.Width, removeRect.Height,
+                        removeRect.Contains(mouse) ? Color.OrangeRed : Color.Salmon, 4f, false);
+                    Utility.drawTextWithShadow(b, removeLabel, Game1.smallFont,
+                        new Vector2(removeRect.X + 12, removeRect.Y + (removeRect.Height - (int)removeTextSize.Y) / 2), Game1.textColor);
+
+                    if (justClicked && removeRect.Contains(mouse))
+                    {
+                        _config.Rewards.RemoveAt(i);
+                        _wasMouseDownList = false;
+                        return;
+                    }
                 }
             }
         }

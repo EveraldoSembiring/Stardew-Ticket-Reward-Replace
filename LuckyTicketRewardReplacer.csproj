@@ -3,12 +3,13 @@
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <TargetFramework>net6.0</TargetFramework>
-    <AssemblyName>LuckyTicketRewardReplacer</AssemblyName>
-    <RootNamespace>LuckyTicketRewardReplacer</RootNamespace>
+    <AssemblyName>CustomPrizeTicket</AssemblyName>
+    <RootNamespace>CustomPrizeTicket</RootNamespace>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <OutputPath>./Build</OutputPath>
     <ModZipPath>./Build</ModZipPath>
+    <ModFolderName>CustomPrizeTicket</ModFolderName>
   </PropertyGroup>
 
   <ItemGroup>

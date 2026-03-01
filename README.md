@@ -1,11 +1,13 @@
-# Lucky Ticket Reward Replacer
+# Custom Prize Ticket
 
 A [SMAPI](https://smapi.io) mod for **Stardew Valley 1.6** that lets you fully customize the prizes available at Lewis' Prize Ticket Machine using an in-game config menu.
 
 ## Features
 
-- **In-game editor** — configure rewards directly from the pause or title menu via Generic Mod Config Menu
-- **Add & remove rewards** — live add/remove with item icon preview
+- **Enable/disable toggle** — turn reward replacement on or off without removing the mod
+- **In-game item search** — type to search all items by name or ID; the list appears only while filtering
+- **Add & remove rewards** — add any item to the prize pool and remove ones you don't want
+- **3-item minimum** — Remove buttons are hidden when only 3 rewards remain
 - **Persistent config** — your reward list is saved to `config.json` automatically
 - **Harmony-patched** — replaces the hardcoded prize list in `PrizeTicketMenu` at runtime
 
@@ -26,24 +28,33 @@ A [SMAPI](https://smapi.io) mod for **Stardew Valley 1.6** that lets you fully c
 
 ## Usage
 
-Open the in-game menu → **Options** → **Mod Config** → **Lucky Ticket Reward Replacer**.
+Open the in-game menu → **Options** → **Mod Config** → **Custom Prize Ticket**.
 
 ```
 ┌─────────────────────────────────────────────────┐
-│       Lucky Ticket Reward Replacer              │
+│            Custom Prize Ticket                  │
+├─────────────────────────────────────────────────┤
+│  [x] Enable Reward Replacement                  │
 ├─────────────────────────────────────────────────┤
 │  Add Reward                                     │
-│  Item ID:  [(O)72_____________________]         │
+│  [Filter: Diamond____________]                  │
+│    Diamond                                      │
+│    Diamond Wand                                 │
 │  [+ Add to List]   Added: Diamond               │
 ├─────────────────────────────────────────────────┤
 │  Current Rewards                                │
-│  [icon] Diamond                    [Remove]     │
-│  [icon] Iridium Bar                [Remove]     │
-│  [icon] Prismatic Shard            [Remove]     │
+│  Diamond                           [Remove]     │
+│  Iridium Bar                       [Remove]     │
+│  Prismatic Shard                               │
 └─────────────────────────────────────────────────┘
 ```
 
-Changes take effect the next time you open the prize machine.
+1. Check **Enable Reward Replacement** to activate the mod
+2. Under **Add Reward**, type in the search box to filter items
+3. Click an item from the list to select it
+4. Click **+ Add to List** to add it to your reward pool
+5. Under **Current Rewards**, click **Remove** to delete an entry (minimum 3 required)
+6. Click **Save** — changes take effect the next time you open the prize machine
 
 ### Finding Item IDs
 
@@ -66,6 +77,7 @@ A full list is available on the [Stardew Valley Wiki — Item IDs](https://stard
 
 ```json
 {
+  "Enabled": true,
   "Rewards": [
     { "ItemId": "(O)631" },
     { "ItemId": "(O)630" },
@@ -76,7 +88,8 @@ A full list is available on the [Stardew Valley Wiki — Item IDs](https://stard
 
 | Field | Description |
 |---|---|
-| `Rewards` | List of reward entries. Each entry requires an `ItemId`. Each prize costs 1 prize ticket and can only be claimed once. |
+| `Enabled` | When `false`, the vanilla prize list is used with no changes. |
+| `Rewards` | List of reward entries. Each entry requires an `ItemId`. Minimum 3 entries required. |
 
 ## Building from Source
 

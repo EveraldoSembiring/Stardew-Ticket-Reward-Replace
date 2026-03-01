@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace LuckyTicketRewardReplacer
+namespace CustomPrizeTicket
 {
     public class RewardEntry
     {
@@ -9,6 +9,9 @@ namespace LuckyTicketRewardReplacer
 
     public class ModConfig
     {
+        /// <summary>When false, the vanilla prize list is used with no changes.</summary>
+        public bool Enabled { get; set; } = true;
+
         /// <summary>Items available from Lewis' prize machine. Each costs 1 prize ticket.</summary>
         public List<RewardEntry> Rewards { get; set; } = new()
         {

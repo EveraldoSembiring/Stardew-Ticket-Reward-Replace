@@ -1,10 +1,10 @@
 {
-  "Name": "Lucky Ticket Reward Replacer",
+  "Name": "Custom Prize Ticket",
   "Author": "Vroldo",
-  "Version": "1.0.0",
+  "Version": "0.1.0",
   "Description": "Adds an in-game editor to configure prize ticket rewards at Lewis' house.",
-  "UniqueID": "Vroldo.LuckyTicketRewardReplacer",
-  "EntryDll": "LuckyTicketRewardReplacer.dll",
+  "UniqueID": "Vroldo.CustomPrizeTicket",
+  "EntryDll": "CustomPrizeTicket.dll",
   "MinimumApiVersion": "4.0.0",
   "UpdateKeys": [],
   "Dependencies": [
