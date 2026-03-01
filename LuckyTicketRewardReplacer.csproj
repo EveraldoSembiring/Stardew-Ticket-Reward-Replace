@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>LuckyTicketRewardReplacer</AssemblyName>
+    <RootNamespace>LuckyTicketRewardReplacer</RootNamespace>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <OutputPath>./Build</OutputPath>
+    <ModZipPath>./Build</ModZipPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Automatically locates your Stardew Valley install and adds all required references -->
+    <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- HarmonyLib is bundled with SMAPI but not auto-referenced by ModBuildConfig -->
+    <Reference Include="0Harmony">
+      <HintPath>D:\Game\SteamLibrary\steamapps\common\Stardew Valley\smapi-internal\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

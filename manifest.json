@@ -1,0 +1,16 @@
+{
+  "Name": "Lucky Ticket Reward Replacer",
+  "Author": "Vroldo",
+  "Version": "1.0.0",
+  "Description": "Adds an in-game editor to configure prize ticket rewards at Lewis' house.",
+  "UniqueID": "Vroldo.LuckyTicketRewardReplacer",
+  "EntryDll": "LuckyTicketRewardReplacer.dll",
+  "MinimumApiVersion": "4.0.0",
+  "UpdateKeys": [],
+  "Dependencies": [
+    {
+      "UniqueID": "spacechase0.GenericModConfigMenu",
+      "IsRequired": true
+    }
+  ]
+}

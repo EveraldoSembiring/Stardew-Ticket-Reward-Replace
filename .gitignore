@@ -1,0 +1,4 @@
+obj/
+Build/
+.vs/
+*.user
