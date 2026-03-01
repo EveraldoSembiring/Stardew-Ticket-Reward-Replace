@@ -2,6 +2,11 @@ using System.Collections.Generic;
 
 namespace CustomPrizeTicket
 {
+    public class PrizeQueueData
+    {
+        public List<string> ItemIds { get; set; } = new();
+    }
+
     public class RewardEntry
     {
         public string ItemId { get; set; } = "(O)72";

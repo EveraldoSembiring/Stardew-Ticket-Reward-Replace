@@ -1,7 +1,7 @@
 {
   "Name": "Custom Prize Ticket",
   "Author": "Vroldo",
-  "Version": "0.1.0",
+  "Version": "0.1.1",
   "Description": "Adds an in-game editor to configure prize ticket rewards at Lewis' house.",
   "UniqueID": "Vroldo.CustomPrizeTicket",
   "EntryDll": "CustomPrizeTicket.dll",

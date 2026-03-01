@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using HarmonyLib;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -14,8 +15,12 @@ namespace CustomPrizeTicket
 {
     internal sealed class ModEntry : Mod
     {
-        // Static reference so the Harmony postfix (which must be static) can access config.
+        // Static reference so the Harmony patches (which must be static) can access instance state.
         private static ModEntry _instance = null!;
+        private static Dictionary<FieldInfo, List<Item>>? _savedItemLists;
+
+        private const int QueueLength = 100;
+        private PrizeQueueData _prizeQueue = new();
 
         private ModConfig _config = null!;
         private string[] _allItemIds = Array.Empty<string>();
@@ -40,6 +45,8 @@ namespace CustomPrizeTicket
             _config = helper.ReadConfig<ModConfig>();
 
             helper.Events.GameLoop.GameLaunched += OnGameLaunched;
+            helper.Events.GameLoop.SaveLoaded += OnSaveLoaded;
+            helper.Events.Display.MenuChanged += OnMenuChanged;
         }
 
         // ── Game launched: Harmony + GMCM ────────────────────────────────────
@@ -64,11 +71,25 @@ namespace CustomPrizeTicket
         {
             try
             {
+                var harmony = new Harmony(ModManifest.UniqueID);
+
                 var ctor = AccessTools.GetDeclaredConstructors(typeof(PrizeTicketMenu)).First();
-                new Harmony(ModManifest.UniqueID).Patch(
+                harmony.Patch(
                     original: ctor,
                     postfix: new HarmonyMethod(typeof(ModEntry), nameof(PrizeTicketMenuCtorPostfix))
                 );
+
+                var draw = AccessTools.Method(typeof(PrizeTicketMenu), "draw",
+                    new[] { typeof(SpriteBatch) });
+                if (draw != null)
+                {
+                    harmony.Patch(
+                        original: draw,
+                        prefix: new HarmonyMethod(typeof(ModEntry), nameof(PrizeTicketMenuDrawPrefix)),
+                        postfix: new HarmonyMethod(typeof(ModEntry), nameof(PrizeTicketMenuDrawPostfix))
+                    );
+                }
+
                 Monitor.Log("PrizeTicketMenu patched successfully.", LogLevel.Debug);
             }
             catch (Exception ex)
@@ -85,11 +106,6 @@ namespace CustomPrizeTicket
             if (!_instance._config.Enabled)
                 return;
 
-            var newItems = _instance._config.Rewards
-                .Select(r => ItemRegistry.Create(r.ItemId, allowNull: true))
-                .OfType<Item>()
-                .ToList();
-
             var fields = AccessTools.GetDeclaredFields(typeof(PrizeTicketMenu));
 
             // Log all fields at debug level to help diagnose if something goes wrong.
@@ -98,23 +114,142 @@ namespace CustomPrizeTicket
                 string.Join(", ", fields.Select(f => $"{f.Name}:{f.FieldType.Name}")),
                 LogLevel.Debug);
 
+            // Refill queue to QueueLength using shuffle-bag so distribution is even.
+            int needed = QueueLength - _instance._prizeQueue.ItemIds.Count;
+            if (needed > 0)
+                _instance._prizeQueue.ItemIds.AddRange(_instance.ShuffleBagFill(needed));
+            _instance.Helper.Data.WriteSaveData("PrizeQueue", _instance._prizeQueue);
+
+            bool replaced = false;
             foreach (var field in fields)
             {
                 if (field.FieldType == typeof(List<Item>))
                 {
+                    var newItems = _instance._prizeQueue.ItemIds
+                        .Select(id => ItemRegistry.Create(id, allowNull: true))
+                        .OfType<Item>()
+                        .ToList();
                     field.SetValue(__instance, newItems);
                     _instance.Monitor.Log($"Prize items replaced via '{field.Name}'.", LogLevel.Info);
-                    return;
+                    replaced = true;
                 }
             }
 
-            _instance.Monitor.Log(
-                "Could not find a List<Item> field in PrizeTicketMenu — " +
-                "the mod may need updating for this game version.",
-                LogLevel.Warn);
+            if (!replaced)
+                _instance.Monitor.Log(
+                    "Could not find a List<Item> field in PrizeTicketMenu — " +
+                    "the mod may need updating for this game version.",
+                    LogLevel.Warn);
+        }
+
+        // Trim list before draw so items beyond the visible slots are never rendered.
+        // The 4th slot only appears after the movingRewardTrack animation finishes.
+        private static void PrizeTicketMenuDrawPrefix(PrizeTicketMenu __instance)
+        {
+            _savedItemLists = null;
+
+            int drawLimit = 3;
+            var trackField = AccessTools.DeclaredField(typeof(PrizeTicketMenu), "movingRewardTrack");
+            if (trackField != null)
+            {
+                var val = trackField.GetValue(__instance);
+                bool trackDone = val switch
+                {
+                    bool b   => !b,
+                    int i    => i <= 0,
+                    float f  => f <= 0f,
+                    _        => true
+                };
+                if (trackDone) drawLimit = 4;
+            }
+
+            foreach (var field in AccessTools.GetDeclaredFields(typeof(PrizeTicketMenu)))
+            {
+                if (field.FieldType != typeof(List<Item>)) continue;
+                var list = (List<Item>?)field.GetValue(__instance);
+                if (list == null || list.Count <= drawLimit) continue;
+                _savedItemLists ??= new Dictionary<FieldInfo, List<Item>>();
+                _savedItemLists[field] = list;
+                field.SetValue(__instance, list.Take(drawLimit).ToList());
+            }
+        }
+
+        // Restore the full list after draw so click/purchase logic still sees all items.
+        private static void PrizeTicketMenuDrawPostfix(PrizeTicketMenu __instance)
+        {
+            if (_savedItemLists == null) return;
+            foreach (var (field, list) in _savedItemLists)
+                field.SetValue(__instance, list);
+            _savedItemLists = null;
         }
 
         // ── GMCM registration ─────────────────────────────────────────────────
+        private void OnSaveLoaded(object? sender, SaveLoadedEventArgs e) => InitializePrizeQueue();
+
+        private void OnMenuChanged(object? sender, MenuChangedEventArgs e)
+        {
+            if (e.OldMenu is not PrizeTicketMenu oldMenu) return;
+
+            // Save whatever items remain in the menu as the new queue state.
+            foreach (var field in AccessTools.GetDeclaredFields(typeof(PrizeTicketMenu)))
+            {
+                if (field.FieldType == typeof(List<Item>) && field.GetValue(oldMenu) is List<Item> list)
+                {
+                    _prizeQueue.ItemIds = list.Select(i => i.QualifiedItemId).ToList();
+                    Helper.Data.WriteSaveData("PrizeQueue", _prizeQueue);
+                    Monitor.Log($"Prize queue saved: {_prizeQueue.ItemIds.Count} items remaining.", LogLevel.Debug);
+                    return;
+                }
+            }
+        }
+
+        private void ClearPrizeQueue()
+        {
+            _prizeQueue = new PrizeQueueData();
+            if (Context.IsWorldReady)
+                Helper.Data.WriteSaveData("PrizeQueue", _prizeQueue);
+        }
+
+        private void InitializePrizeQueue()
+        {
+            _prizeQueue = Helper.Data.ReadSaveData<PrizeQueueData>("PrizeQueue") ?? new PrizeQueueData();
+
+            int needed = QueueLength - _prizeQueue.ItemIds.Count;
+            if (needed > 0)
+                _prizeQueue.ItemIds.AddRange(ShuffleBagFill(needed));
+
+            Helper.Data.WriteSaveData("PrizeQueue", _prizeQueue);
+            Monitor.Log($"Prize queue: {string.Join(", ", _prizeQueue.ItemIds)}", LogLevel.Debug);
+        }
+
+        // Shuffle-bag fill: cycles through a shuffled copy of rewards so every item
+        // appears roughly equally often and consecutive duplicates are unlikely.
+        private IEnumerable<string> ShuffleBagFill(int count)
+        {
+            var rewards = _config.Rewards;
+            if (rewards.Count == 0)
+            {
+                for (int i = 0; i < count; i++) yield return "(O)72";
+                yield break;
+            }
+
+            var bag = new List<string>();
+            for (int i = 0; i < count; i++)
+            {
+                if (bag.Count == 0)
+                {
+                    bag.AddRange(rewards.Select(r => r.ItemId));
+                    for (int j = bag.Count - 1; j > 0; j--)
+                    {
+                        int k = Game1.random.Next(j + 1);
+                        (bag[j], bag[k]) = (bag[k], bag[j]);
+                    }
+                }
+                yield return bag[^1];
+                bag.RemoveAt(bag.Count - 1);
+            }
+        }
+
         private void RegisterGmcm()
         {
             var gmcm = Helper.ModRegistry.GetApi<IGenericModConfigMenuApi>("spacechase0.GenericModConfigMenu");
@@ -126,8 +261,8 @@ namespace CustomPrizeTicket
 
             gmcm.Register(
                 mod: ModManifest,
-                reset: () => _config = new ModConfig(),
-                save: () => Helper.WriteConfig(_config)
+                reset: () => { _config = new ModConfig(); ClearPrizeQueue(); },
+                save: () => { Helper.WriteConfig(_config); ClearPrizeQueue(); }
             );
 
             gmcm.AddBoolOption(
