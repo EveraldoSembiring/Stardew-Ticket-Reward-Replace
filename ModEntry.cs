@@ -18,9 +18,12 @@ namespace CustomPrizeTicket
         // Static reference so the Harmony patches (which must be static) can access instance state.
         private static ModEntry _instance = null!;
         private static Dictionary<FieldInfo, List<Item>>? _savedItemLists;
+        private static readonly FieldInfo? PrizeTrackField =
+            AccessTools.DeclaredField(typeof(PrizeTicketMenu), "currentPrizeTrack");
 
         private const int QueueLength = 100;
         private PrizeQueueData _prizeQueue = new();
+        private string GlobalKey => $"PrizeQueue_{Constants.SaveFolderName}";
 
         private ModConfig _config = null!;
         private string[] _allItemIds = Array.Empty<string>();
@@ -118,28 +121,24 @@ namespace CustomPrizeTicket
             int needed = QueueLength - _instance._prizeQueue.ItemIds.Count;
             if (needed > 0)
                 _instance._prizeQueue.ItemIds.AddRange(_instance.ShuffleBagFill(needed));
-            _instance.Helper.Data.WriteSaveData("PrizeQueue", _instance._prizeQueue);
+            _instance.Helper.Data.WriteGlobalData(_instance.GlobalKey, _instance._prizeQueue);
 
-            bool replaced = false;
-            foreach (var field in fields)
+            if (PrizeTrackField != null)
             {
-                if (field.FieldType == typeof(List<Item>))
-                {
-                    var newItems = _instance._prizeQueue.ItemIds
-                        .Select(id => ItemRegistry.Create(id, allowNull: true))
-                        .OfType<Item>()
-                        .ToList();
-                    field.SetValue(__instance, newItems);
-                    _instance.Monitor.Log($"Prize items replaced via '{field.Name}'.", LogLevel.Info);
-                    replaced = true;
-                }
+                var newItems = _instance._prizeQueue.ItemIds
+                    .Select(id => ItemRegistry.Create(id, allowNull: true))
+                    .OfType<Item>()
+                    .ToList();
+                PrizeTrackField.SetValue(__instance, newItems);
+                _instance.Monitor.Log($"Prize items replaced via '{PrizeTrackField.Name}'.", LogLevel.Info);
             }
-
-            if (!replaced)
+            else
+            {
                 _instance.Monitor.Log(
-                    "Could not find a List<Item> field in PrizeTicketMenu — " +
+                    "Could not find 'currentPrizeTrack' in PrizeTicketMenu — " +
                     "the mod may need updating for this game version.",
                     LogLevel.Warn);
+            }
         }
 
         // Trim list before draw so items beyond the visible slots are never rendered.
@@ -163,14 +162,15 @@ namespace CustomPrizeTicket
                 if (trackDone) drawLimit = 4;
             }
 
-            foreach (var field in AccessTools.GetDeclaredFields(typeof(PrizeTicketMenu)))
+            if (PrizeTrackField != null &&
+                PrizeTrackField.GetValue(__instance) is List<Item> prizeList &&
+                prizeList.Count > drawLimit)
             {
-                if (field.FieldType != typeof(List<Item>)) continue;
-                var list = (List<Item>?)field.GetValue(__instance);
-                if (list == null || list.Count <= drawLimit) continue;
-                _savedItemLists ??= new Dictionary<FieldInfo, List<Item>>();
-                _savedItemLists[field] = list;
-                field.SetValue(__instance, list.Take(drawLimit).ToList());
+                _savedItemLists = new Dictionary<FieldInfo, List<Item>>
+                {
+                    [PrizeTrackField] = prizeList
+                };
+                PrizeTrackField.SetValue(__instance, prizeList.Take(drawLimit).ToList());
             }
         }
 
@@ -191,15 +191,11 @@ namespace CustomPrizeTicket
             if (e.OldMenu is not PrizeTicketMenu oldMenu) return;
 
             // Save whatever items remain in the menu as the new queue state.
-            foreach (var field in AccessTools.GetDeclaredFields(typeof(PrizeTicketMenu)))
+            if (PrizeTrackField?.GetValue(oldMenu) is List<Item> remaining)
             {
-                if (field.FieldType == typeof(List<Item>) && field.GetValue(oldMenu) is List<Item> list)
-                {
-                    _prizeQueue.ItemIds = list.Select(i => i.QualifiedItemId).ToList();
-                    Helper.Data.WriteSaveData("PrizeQueue", _prizeQueue);
-                    Monitor.Log($"Prize queue saved: {_prizeQueue.ItemIds.Count} items remaining.", LogLevel.Debug);
-                    return;
-                }
+                _prizeQueue.ItemIds = remaining.Select(i => i.QualifiedItemId).ToList();
+                Helper.Data.WriteGlobalData(GlobalKey, _prizeQueue);
+                Monitor.Log($"Prize queue saved: {_prizeQueue.ItemIds.Count} items remaining.", LogLevel.Debug);
             }
         }
 
@@ -207,18 +203,18 @@ namespace CustomPrizeTicket
         {
             _prizeQueue = new PrizeQueueData();
             if (Context.IsWorldReady)
-                Helper.Data.WriteSaveData("PrizeQueue", _prizeQueue);
+                Helper.Data.WriteGlobalData(GlobalKey, _prizeQueue);
         }
 
         private void InitializePrizeQueue()
         {
-            _prizeQueue = Helper.Data.ReadSaveData<PrizeQueueData>("PrizeQueue") ?? new PrizeQueueData();
+            _prizeQueue = Helper.Data.ReadGlobalData<PrizeQueueData>(GlobalKey) ?? new PrizeQueueData();
 
             int needed = QueueLength - _prizeQueue.ItemIds.Count;
             if (needed > 0)
                 _prizeQueue.ItemIds.AddRange(ShuffleBagFill(needed));
 
-            Helper.Data.WriteSaveData("PrizeQueue", _prizeQueue);
+            Helper.Data.WriteGlobalData(GlobalKey, _prizeQueue);
             Monitor.Log($"Prize queue: {string.Join(", ", _prizeQueue.ItemIds)}", LogLevel.Debug);
         }
 
@@ -322,6 +318,28 @@ namespace CustomPrizeTicket
         }
 
         // ── GMCM draw callbacks ───────────────────────────────────────────────
+        private const int IconBoxSize = 32;
+
+        // Draws an item sprite scaled to fit a fixed IconBoxSize × IconBoxSize box.
+        private static void DrawItemIcon(SpriteBatch b, string? itemId, int boxX, int boxY)
+        {
+            if (itemId == null) return;
+            var itemData = ItemRegistry.GetData(itemId);
+            if (itemData == null) return;
+            var src = itemData.GetSourceRect();
+            if (src.Width <= 0 || src.Height <= 0) return;
+
+            float scale = Math.Min((float)IconBoxSize / src.Width, (float)IconBoxSize / src.Height);
+            int drawW = (int)(src.Width * scale);
+            int drawH = (int)(src.Height * scale);
+            int offX = (IconBoxSize - drawW) / 2;
+            int offY = (IconBoxSize - drawH) / 2;
+
+            b.Draw(itemData.GetTexture(),
+                new Rectangle(boxX + offX, boxY + offY, drawW, drawH),
+                src, Color.White);
+        }
+
         private void DrawAddButton(SpriteBatch b, Vector2 pos)
         {
             Point mouse = new(Game1.getMouseX(true), Game1.getMouseY(true));
@@ -414,8 +432,10 @@ namespace CustomPrizeTicket
                     else if (rowRect.Contains(mouse))
                         b.Draw(Game1.staminaRect, rowRect, new Color(200, 200, 200, 80));
 
+                    DrawItemIcon(b, id, rowRect.X + 2, rowY + (rowRect.Height - IconBoxSize) / 2);
+
                     b.DrawString(Game1.smallFont, itemData?.DisplayName ?? id,
-                        new Vector2(rowRect.X + 6, rowY + 10), Game1.textColor);
+                        new Vector2(rowRect.X + IconBoxSize + 8, rowY + 10), Game1.textColor);
 
                     if (justClicked && rowRect.Contains(mouse))
                     {
@@ -462,7 +482,9 @@ namespace CustomPrizeTicket
                 var itemData = ItemRegistry.GetData(reward.ItemId);
                 string displayName = itemData?.DisplayName ?? $"[Unknown] {reward.ItemId}";
                 Color textColor = itemData is not null ? Game1.textColor : Color.Firebrick;
-                b.DrawString(Game1.smallFont, displayName, new Vector2(pos.X + 6, rowY + 10), textColor);
+
+                DrawItemIcon(b, reward.ItemId, (int)pos.X + 2, rowY + 4);
+                b.DrawString(Game1.smallFont, displayName, new Vector2(pos.X + IconBoxSize + 8, rowY + 10), textColor);
 
                 if (_config.Rewards.Count > 3)
                 {
